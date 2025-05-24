@@ -4,13 +4,17 @@ FROM node:18-alpine
 # Set working directory in container
 WORKDIR /app
 
-# Copy package files
+# Copy package files first (for better caching)
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production && npm cache clean --force
+# Install dependencies with error handling
+RUN npm ci --only=production --no-audit --no-fund || \
+    npm install --production --no-audit --no-fund
 
-# Create uploads directory
+# Clean npm cache
+RUN npm cache clean --force
+
+# Create directories
 RUN mkdir -p uploads public
 
 # Copy application code
@@ -20,8 +24,8 @@ COPY . .
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nextjs -u 1001
 
-# Change ownership of uploads directory
-RUN chown -R nextjs:nodejs /app/uploads
+# Change ownership of necessary directories
+RUN chown -R nextjs:nodejs /app/uploads /app/public
 
 # Switch to non-root user
 USER nextjs
@@ -31,7 +35,7 @@ EXPOSE 3000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node healthcheck.js
+  CMD node healthcheck.js || exit 1
 
 # Start the application
 CMD ["npm", "start"]

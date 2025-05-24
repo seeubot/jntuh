@@ -12,7 +12,7 @@ require('dotenv').config();
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const MONGO_URI = process.env.MONGODB_URI || 'mongodb+srv://room:room@room.4vris.mongodb.net/?retryWrites=true&w=majority&appName=room';
 const ADMIN_IDS = process.env.ADMIN_IDS ? process.env.ADMIN_IDS.split(',').map(id => parseInt(id)) : [];
-const MUST_JOIN_CHANNEL = process.env.MUST_JOIN_CHANNEL || '@jntuh_updates';
+const MUST_JOIN_CHANNEL = process.env.MUST_JOIN_CHANNEL || '@jntuhupdates26';
 
 // Validate required environment variables
 if (!BOT_TOKEN) {
@@ -795,10 +795,20 @@ app.get('/api/stats', async (req, res) => {
   }
 });
 
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'healthy', 
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
+});
+
 // Start server
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`Bot is running...`);
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🤖 Bot is running...`);
+  console.log(`🌐 Health check available at /health`);
 });
 
 // Error handling

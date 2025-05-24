@@ -14,6 +14,9 @@ const MONGO_URI = process.env.MONGODB_URI || 'mongodb+srv://room:room@room.4vris
 const ADMIN_IDS = process.env.ADMIN_IDS ? process.env.ADMIN_IDS.split(',').map(id => parseInt(id)) : [];
 const MUST_JOIN_CHANNEL = process.env.MUST_JOIN_CHANNEL || '@jntuhupdates26';
 
+// Available branches
+const AVAILABLE_BRANCHES = ['CSE', 'ECE', 'EEE', 'MECH', 'CIVIL', 'IT', 'CSM', 'CSD', 'CSC', 'AIDS', 'AIML'];
+
 // Validate required environment variables
 if (!BOT_TOKEN) {
   console.error('❌ BOT_TOKEN is required! Please set it in your .env file');
@@ -65,7 +68,7 @@ const fileSchema = new mongoose.Schema({
   filePath: String,
   fileId: String,
   subjectName: String,
-  branch: String,
+  branches: [String], // Changed from single branch to array of branches
   regulation: String,
   type: { type: String, enum: ['notes', 'paper'] },
   examDate: Date, // Only for papers
@@ -292,8 +295,14 @@ Example: Data Structures, Operating Systems
 
 // Handle upload details step by step
 const handleUploadDetails = async (chatId, userId, text, state) => {
-  const steps = ['subject', 'branch', 'regulation', 'type'];
+  const steps = ['subject', 'branches', 'regulation', 'type'];
   const currentStepIndex = steps.indexOf(state.step);
+  
+  if (state.step === 'branches') {
+    // Handle branch selection differently
+    await handleBranchSelection(chatId, state);
+    return;
+  }
   
   // Store current step data
   state[state.step] = text.trim();
@@ -306,12 +315,9 @@ const handleUploadDetails = async (chatId, userId, text, state) => {
     
     let promptMessage = '';
     switch (nextStep) {
-      case 'branch':
-        promptMessage = `
-Step 2/4: Enter Branch
-Example: CSE, ECE, EEE, MECH, CIVIL, IT
-        `;
-        break;
+      case 'branches':
+        await handleBranchSelection(chatId, state);
+        return;
       case 'regulation':
         promptMessage = `
 Step 3/4: Enter Regulation
@@ -334,6 +340,52 @@ Choose: notes or paper
   }
 };
 
+// Handle branch selection for file upload
+const handleBranchSelection = async (chatId, state) => {
+  const message = `
+Step 2/4: Select Branch(es)
+
+Choose one or multiple branches for this file:
+  `;
+  
+  // Create inline keyboard with branch options
+  const branchButtons = [];
+  const rows = [];
+  
+  // Add individual branch buttons (2 per row)
+  for (let i = 0; i < AVAILABLE_BRANCHES.length; i += 2) {
+    const row = [];
+    row.push({ text: AVAILABLE_BRANCHES[i], callback_data: `toggle_branch_${AVAILABLE_BRANCHES[i]}` });
+    if (i + 1 < AVAILABLE_BRANCHES.length) {
+      row.push({ text: AVAILABLE_BRANCHES[i + 1], callback_data: `toggle_branch_${AVAILABLE_BRANCHES[i + 1]}` });
+    }
+    rows.push(row);
+  }
+  
+  // Add utility buttons
+  rows.push([
+    { text: '✅ Select All', callback_data: 'select_all_branches' },
+    { text: '❌ Clear All', callback_data: 'clear_all_branches' }
+  ]);
+  
+  rows.push([{ text: '✅ Done', callback_data: 'confirm_branch_selection' }]);
+  
+  const keyboard = {
+    reply_markup: {
+      inline_keyboard: rows
+    }
+  };
+  
+  // Initialize selected branches array if not exists
+  if (!state.selectedBranches) {
+    state.selectedBranches = [];
+  }
+  
+  userStates.set(chatId, state);
+  
+  bot.sendMessage(chatId, message + `\nSelected: ${state.selectedBranches.join(', ') || 'None'}`, keyboard);
+};
+
 // Save uploaded file to database
 const saveUploadedFile = async (chatId, userId, state) => {
   try {
@@ -341,7 +393,7 @@ const saveUploadedFile = async (chatId, userId, state) => {
       fileName: state.fileName,
       fileId: state.fileId,
       subjectName: state.subject,
-      branch: state.branch.toUpperCase(),
+      branches: state.selectedBranches || [], // Use selected branches array
       regulation: state.regulation.toUpperCase(),
       type: state.type.toLowerCase(),
       uploadedBy: userId
@@ -354,7 +406,7 @@ const saveUploadedFile = async (chatId, userId, state) => {
 
 📄 File: ${state.fileName}
 🎓 Subject: ${state.subject}
-🏢 Branch: ${state.branch}
+🏢 Branches: ${state.selectedBranches.join(', ')}
 📅 Regulation: ${state.regulation}
 📝 Type: ${state.type}
     `;
@@ -374,7 +426,7 @@ const saveUploadedFile = async (chatId, userId, state) => {
   }
 };
 
-// Handle search
+// Handle search (updated to work with branches array)
 const handleSearch = async (chatId, text, type) => {
   const files = await File.find({
     subjectName: new RegExp(text, 'i'),
@@ -388,10 +440,14 @@ const handleSearch = async (chatId, text, type) => {
     bot.sendMessage(chatId, message);
     
     for (const file of files) {
+      const branches = file.branches && file.branches.length > 0 
+        ? file.branches.join(', ') 
+        : (file.branch || 'All'); // Fallback for old single branch format
+      
       const fileInfo = `
 📄 ${file.fileName}
 🎓 Subject: ${file.subjectName}
-🏢 Branch: ${file.branch}
+🏢 Branches: ${branches}
 📅 Regulation: ${file.regulation}
 📥 Downloads: ${file.downloads}
       `;
@@ -475,14 +531,17 @@ Please enter the subject name:
   userStates.set(chatId, { action: 'search', type });
 };
 
-// Branch selection
+// Branch selection (updated to work with branches array)
 const showBranchSelection = (chatId) => {
   const keyboard = {
     reply_markup: {
       inline_keyboard: [
         [{ text: 'CSE', callback_data: 'branch_CSE' }, { text: 'ECE', callback_data: 'branch_ECE' }],
         [{ text: 'EEE', callback_data: 'branch_EEE' }, { text: 'MECH', callback_data: 'branch_MECH' }],
-        [{ text: 'CIVIL', callback_data: 'branch_CIVIL' }, { text: 'IT', callback_data: 'branch_IT' }]
+        [{ text: 'CIVIL', callback_data: 'branch_CIVIL' }, { text: 'IT', callback_data: 'branch_IT' }],
+        [{ text: 'CSM', callback_data: 'branch_CSM' }, { text: 'CSD', callback_data: 'branch_CSD' }],
+        [{ text: 'CSC', callback_data: 'branch_CSC' }, { text: 'AIDS', callback_data: 'branch_AIDS' }],
+        [{ text: 'AIML', callback_data: 'branch_AIML' }]
       ]
     }
   };
@@ -525,7 +584,10 @@ const showFileStatus = async (chatId) => {
     `;
     
     recentFiles.forEach((file, index) => {
-      statusMessage += `${index + 1}. ${file.subjectName} (${file.branch})\n`;
+      const branches = file.branches && file.branches.length > 0 
+        ? file.branches.join(', ') 
+        : (file.branch || 'All');
+      statusMessage += `${index + 1}. ${file.subjectName} (${branches})\n`;
     });
     
     statusMessage += `\n🔥 Most Downloaded:\n`;
@@ -623,6 +685,7 @@ const showHelp = (chatId) => {
 
 👨‍💼 Admin Features:
 • Upload files by sending documents directly
+• Select multiple branches for each file
 • View and manage user requests
 • Access detailed statistics
 
@@ -659,16 +722,130 @@ bot.on('callback_query', async (callbackQuery) => {
     }
   }
   
+  // Handle branch selection for file upload
+  if (data.startsWith('toggle_branch_')) {
+    const branch = data.replace('toggle_branch_', '');
+    const state = userStates.get(chatId);
+    
+    if (state && state.action === 'upload_file' && state.step === 'branches') {
+      if (!state.selectedBranches) {
+        state.selectedBranches = [];
+      }
+      
+      const index = state.selectedBranches.indexOf(branch);
+      if (index > -1) {
+        // Remove branch if already selected
+        state.selectedBranches.splice(index, 1);
+        bot.answerCallbackQuery(callbackQuery.id, { text: `❌ Removed ${branch}` });
+      } else {
+        // Add branch if not selected
+        state.selectedBranches.push(branch);
+        bot.answerCallbackQuery(callbackQuery.id, { text: `✅ Added ${branch}` });
+      }
+      
+      userStates.set(chatId, state);
+      
+      // Update the message to show current selection
+      const updatedText = `Step 2/4: Select Branch(es)\n\nChoose one or multiple branches for this file:\n\nSelected: ${state.selectedBranches.join(', ') || 'None'}`;
+      
+      try {
+        bot.editMessageText(updatedText, {
+          chat_id: chatId,
+          message_id: message.message_id,
+          reply_markup: message.reply_markup
+        });
+      } catch (error) {
+        // Handle edit message error
+      }
+    }
+  }
+  
+  if (data === 'select_all_branches') {
+    const state = userStates.get(chatId);
+    if (state && state.action === 'upload_file' && state.step === 'branches') {
+      state.selectedBranches = [...AVAILABLE_BRANCHES];
+      userStates.set(chatId, state);
+      
+      bot.answerCallbackQuery(callbackQuery.id, { text: '✅ All branches selected!' });
+      
+      const updatedText = `Step 2/4: Select Branch(es)\n\nChoose one or multiple branches for this file:\n\nSelected: ${state.selectedBranches.join(', ')}`;
+      
+      try {
+        bot.editMessageText(updatedText, {
+          chat_id: chatId,
+          message_id: message.message_id,
+          reply_markup: message.reply_markup
+        });
+      } catch (error) {
+        // Handle edit message error
+      }
+    }
+  }
+  
+  if (data === 'clear_all_branches') {
+    const state = userStates.get(chatId);
+    if (state && state.action === 'upload_file' && state.step === 'branches') {
+      state.selectedBranches = [];
+      userStates.set(chatId, state);
+      
+      bot.answerCallbackQuery(callbackQuery.id, { text: '❌ All branches cleared!' });
+      
+      const updatedText = `Step 2/4: Select Branch(es)\n\nChoose one or multiple branches for this file:\n\nSelected: None`;
+      
+      try {
+        bot.editMessageText(updatedText, {
+          chat_id: chatId,
+          message_id: message.message_id,
+          reply_markup: message.reply_markup
+        });
+      } catch (error) {
+        // Handle edit message error
+      }
+    }
+  }
+  
+  if (data === 'confirm_branch_selection') {
+    const state = userStates.get(chatId);
+    if (state && state.action === 'upload_file' && state.step === 'branches') {
+      if (!state.selectedBranches || state.selectedBranches.length === 0) {
+        bot.answerCallbackQuery(callbackQuery.id, { text: '❌ Please select at least one branch!' });
+        return;
+      }
+      
+      bot.answerCallbackQuery(callbackQuery.id, { text: '✅ Branch selection confirmed!' });
+      
+      // Move to next step
+      state.step = 'regulation';
+      userStates.set(chatId, state);
+      
+      bot.sendMessage(chatId, `
+✅ Selected branches: ${state.selectedBranches.join(', ')}
+
+Step 3/4: Enter Regulation
+Example: R18, R16, R15, R13
+      `, { force_reply: true });
+    }
+  }
+  
+  // Handle branch browsing (updated to work with branches array)
   if (data.startsWith('branch_')) {
     const branch = data.replace('branch_', '');
-    const files = await File.find({ branch }).limit(20);
+    const files = await File.find({ 
+      $or: [
+        { branches: branch }, // New format with branches array
+        { branch: branch }    // Old format with single branch (backward compatibility)
+      ]
+    }).limit(20);
     
     if (files.length === 0) {
       bot.sendMessage(chatId, `❌ No files found for ${branch} branch.`);
     } else {
       bot.sendMessage(chatId, `📚 Files for ${branch} branch:`);
       for (const file of files) {
-        const info = `📄 ${file.fileName}\n🎓 ${file.subjectName}\n📅 ${file.regulation}`;
+        const branches = file.branches && file.branches.length > 0 
+          ? file.branches.join(', ') 
+          : (file.branch || 'All');
+        const info = `📄 ${file.fileName}\n🎓 ${file.subjectName}\n🏢 ${branches}\n📅 ${file.regulation}`;
         try {
           await bot.sendDocument(chatId, file.fileId, { caption: info });
           await File.updateOne({ _id: file._id }, { $inc: { downloads: 1 } });
@@ -688,16 +865,23 @@ bot.on('callback_query', async (callbackQuery) => {
 1. Send any document (PDF, DOC, etc.) to this chat
 2. I'll ask for details step by step:
    • Subject Name
-   • Branch (CSE, ECE, etc.)
+   • Branch Selection (Multiple branches can be selected)
    • Regulation (R18, R16, etc.)
    • Type (notes or paper)
 
 3. File will be saved and available for students
 
+📝 New Features:
+• ✅ Select multiple branches for each file
+• ✅ Select All/Clear All branch options
+• ✅ Interactive branch selection interface
+• ✅ Files will be available to all selected branches
+
 📝 Tips:
 • Use clear, consistent naming
 • Include regulation for better organization
 • Papers should be named with exam year if available
+• Select all relevant branches to maximize file accessibility
       `;
       bot.sendMessage(chatId, helpText);
     }
@@ -736,8 +920,21 @@ bot.on('callback_query', async (callbackQuery) => {
 📈 Files by Branch:
       `;
       
+      // Updated branch statistics to handle both old and new format
       const branchStats = await File.aggregate([
-        { $group: { _id: '$branch', count: { $sum: 1 } } },
+        {
+          $project: {
+            allBranches: {
+              $cond: {
+                if: { $isArray: "$branches" },
+                then: "$branches",
+                else: { $cond: { if: "$branch", then: ["$branch"], else: [] } }
+              }
+            }
+          }
+        },
+        { $unwind: "$allBranches" },
+        { $group: { _id: "$allBranches", count: { $sum: 1 } } },
         { $sort: { count: -1 } }
       ]);
       
@@ -755,7 +952,7 @@ bot.on('callback_query', async (callbackQuery) => {
   }
 });
 
-// Web interface routes
+// Web interface routes (updated for multiple branches)
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
@@ -765,7 +962,12 @@ app.get('/api/files', async (req, res) => {
     const { branch, regulation, type, subject } = req.query;
     const query = {};
     
-    if (branch) query.branch = branch;
+    if (branch) {
+      query.$or = [
+        { branches: branch }, // New format
+        { branch: branch }    // Old format (backward compatibility)
+      ];
+    }
     if (regulation) query.regulation = regulation;
     if (type) query.type = type;
     if (subject) query.subjectName = new RegExp(subject, 'i');
@@ -781,8 +983,22 @@ app.get('/api/stats', async (req, res) => {
   try {
     const totalFiles = await File.countDocuments();
     const totalUsers = await User.countDocuments();
+    
+    // Updated branch statistics for API
     const branches = await File.aggregate([
-      { $group: { _id: '$branch', count: { $sum: 1 } } }
+      {
+        $project: {
+          allBranches: {
+            $cond: {
+              if: { $isArray: "$branches" },
+              then: "$branches",
+              else: { $cond: { if: "$branch", then: ["$branch"], else: [] } }
+            }
+          }
+        }
+      },
+      { $unwind: "$allBranches" },
+      { $group: { _id: "$allBranches", count: { $sum: 1 } } }
     ]);
     
     res.json({
@@ -804,11 +1020,39 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Migration endpoint for converting old single branch format to new multi-branch format
+app.post('/api/migrate-branches', async (req, res) => {
+  try {
+    if (!isAdmin(req.body.userId)) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+    
+    const result = await File.updateMany(
+      { branch: { $exists: true }, branches: { $exists: false } },
+      [
+        {
+          $set: {
+            branches: { $cond: { if: "$branch", then: ["$branch"], else: [] } }
+          }
+        }
+      ]
+    );
+    
+    res.json({ 
+      message: 'Migration completed', 
+      modifiedCount: result.modifiedCount 
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`🤖 Bot is running...`);
   console.log(`🌐 Health check available at /health`);
+  console.log(`📚 Multiple branch selection feature enabled`);
 });
 
 // Error handling

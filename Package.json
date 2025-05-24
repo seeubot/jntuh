@@ -1,35 +1,36 @@
 {
-  "name": "jntuh-telegram-bot",
+  "name": "jntuh-student-helper-bot",
   "version": "1.0.0",
-  "description": "Telegram bot for JNTUH students to find notes and papers",
-  "main": "bot.js",
+  "description": "Telegram bot for JNTUH students to access study materials",
+  "main": "index.js",
   "scripts": {
-    "start": "node bot.js",
-    "dev": "nodemon bot.js",
+    "start": "node index.js",
+    "dev": "nodemon index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
     "telegram",
     "bot",
+    "education",
     "jntuh",
-    "students",
-    "notes",
-    "papers"
+    "students"
   ],
   "author": "Your Name",
   "license": "MIT",
   "dependencies": {
-    "cors": "^2.8.5",
-    "dotenv": "^16.5.0",
-    "express": "^4.21.2",
-    "mongoose": "^7.8.7",
+    "node-telegram-bot-api": "^0.64.0",
+    "mongoose": "^8.0.3",
+    "express": "^4.18.2",
     "multer": "^1.4.5-lts.1",
-    "node-telegram-bot-api": "^0.61.0"
+    "dotenv": "^16.3.1",
+    "cors": "^2.8.5",
+    "helmet": "^7.1.0"
   },
   "devDependencies": {
-    "nodemon": "^3.0.1"
+    "nodemon": "^3.0.2"
   },
   "engines": {
-    "node": ">=14.0.0"
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
   }
 }
